@@ -1,26 +1,31 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <title>Metro CDMX - Mapa interactivo</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Camino Óptimo Metro CDMX</title>
+  <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <div id="controls">
-    <div><strong>Origen:</strong> <span id="sel-origin">—</span></div>
-    <div><strong>Destino:</strong> <span id="sel-dest">—</span></div>
-    <div style="margin-top:6px;">
-      <button id="btn-clear">Limpiar</button>
-      <button id="btn-calc" disabled>Calcular ruta</button>
-    </div>
-    <div id="info-route" style="margin-top:8px;font-size:14px;"></div>
-  </div>
+  <h1>Camino Óptimo del Metro CDMX</h1>
 
   <div id="map-container">
-    <img id="metro-map" src="{{ url_for('static', filename='map.png') }}">
-    <svg id="overlay"></svg>
+    <!-- Imagen base del metro -->
+    <img id="metro-map" src="/static/map.png" alt="Mapa del metro CDMX" />
+
+    <!-- Capa SVG donde se dibuja la ruta -->
+    <svg id="route-line"></svg>
+
+    <!-- Capa donde van los botones de estaciones -->
+    <div id="overlay"></div>
   </div>
 
-  <script src="{{ url_for('static', filename='map.js') }}"></script>
+  <div id="controls">
+    <button onclick="resetSelection()">Reiniciar selección</button>
+  </div>
+
+  <div id="result"></div>
+
+  <script src="/static/map.js"></script>
 </body>
 </html>

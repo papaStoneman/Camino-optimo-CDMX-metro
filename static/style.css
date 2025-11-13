@@ -1,43 +1,96 @@
-html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; }
+body {
+  font-family: Arial, sans-serif;
+  background-color: #111;
+  color: #fff;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+}
+
+h1 {
+  color: #f1f1f1;
+  margin-top: 10px;
+  font-size: 22px;
+}
+
 #map-container {
   position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  display: inline-block;
+  margin-top: 20px;
+  border: 2px solid #444;
+  background-color: #000;
 }
+
+/* Imagen con tamaño fijo */
 #metro-map {
-  width: 800px;
-  user-select: none;
+  width: 396px;
+  height: 443px;
   display: block;
+  user-select: none;
 }
+
+/* Capa para la ruta */
+#route-line {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 396px;
+  height: 443px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Capa para botones */
 #overlay {
   position: absolute;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 800px;
-  height: auto;
-  pointer-events: none;
+  width: 396px;
+  height: 443px;
+  z-index: 3;
 }
+
+/* Botones de estaciones */
 .station-btn {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  border: 2px solid white;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
   cursor: pointer;
+  border: 2px solid white;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  z-index: 5;
+  transition: transform 0.2s, background-color 0.2s;
 }
-.marker-origin { background-color: #16a34a; }
-.marker-dest { background-color: #dc2626; }
-.marker-route { background-color: #e11d48; }
+
+.station-btn:hover {
+  transform: translate(-50%, -50%) scale(1.4);
+  z-index: 10;
+}
+
 #controls {
-  position: fixed;
-  top: 20px;
-  left: 20px;
-  background: white;
-  padding: 10px;
-  border-radius: 8px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
+  margin-top: 20px;
+}
+
+button {
+  background-color: #444;
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin: 5px;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #666;
+}
+
+#result {
+  margin-top: 15px;
+  font-size: 14px;
 }

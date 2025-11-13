@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, render_template, jsonify, request
 import json, os
 import networkx as nx
@@ -13,7 +12,7 @@ with open(os.path.join(BASE_DIR, "static", "lines.json"), "r", encoding="utf-8")
 TIME_BETWEEN_STATIONS = 2
 TIME_TRANSFER = 5
 
-# Grafo de líneas
+# Crear grafo
 G = nx.Graph()
 for line_name, info in LINES.items():
     stations = list(info["stations"].keys())
@@ -24,7 +23,7 @@ for line_name, info in LINES.items():
             prev = (stations[i - 1], line_name)
             G.add_edge(prev, node, weight=TIME_BETWEEN_STATIONS, type="rail", line=line_name)
 
-# Crear conexiones de transbordo
+# Crear transbordos
 station_to_nodes = defaultdict(list)
 for node in G.nodes():
     station_to_nodes[node[0]].append(node)
@@ -35,7 +34,7 @@ for st, nodes in station_to_nodes.items():
             for j in range(i + 1, len(nodes)):
                 G.add_edge(nodes[i], nodes[j], weight=TIME_TRANSFER, type="transfer")
 
-# Algoritmo A* (sin heurística)
+# Algoritmo A* sin heurística
 def find_best_path(origin, destination):
     if origin not in station_to_nodes or destination not in station_to_nodes:
         return None, None
@@ -61,7 +60,7 @@ def find_best_path(origin, destination):
     for node in path_nodes:
         if node in (SRC, TGT): continue
         st, line = node
-        readable.append({"station": st, "line": line, "pos": G.nodes[node]["pos"]})
+        readable.append(st)
     return readable, total
 
 @app.route("/")
@@ -75,12 +74,12 @@ def data():
 @app.route("/route", methods=["POST"])
 def route():
     data = request.get_json()
-    origin = data.get("origin")
-    dest = data.get("destination")
+    origin = data.get("start")        # 👈 CAMBIADO
+    dest = data.get("end")            # 👈 CAMBIADO
     path, total = find_best_path(origin, dest)
     if not path:
         return jsonify({"error": "No se encontró una ruta"}), 404
-    return jsonify({"path": path, "total": total})
+    return jsonify({"path": path, "distance": total})  # 👈 'distance' para que JS la lea igual
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -7,23 +7,21 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <h1>Camino Óptimo del Metro CDMX</h1>
 
-  <div id="map-container">
+  <h1>Camino óptimo del Metro CDMX</h1>
 
-    <!-- Imagen base -->
-    <img id="metro-map" src="/static/map.png" alt="Mapa Metro CDMX">
+  <div id="mapa">
 
-    <!-- Rutas -->
-    <svg id="route-line"></svg>
+    <img id="imagen-metro" src="/static/map.png" alt="Mapa Metro CDMX">
 
-    <!-- Botones de estaciones -->
-    <div id="overlay"></div>
+    <svg id="ruta"></svg>
+
+    <div id="estaciones"></div>
 
   </div>
 
-  <div id="result"></div>
-  <div id="steps"></div>
+  <div id="resultado"></div>
+  <div id="lista-pasos"></div>
 
   <script src="/static/map.js"></script>
 </body>

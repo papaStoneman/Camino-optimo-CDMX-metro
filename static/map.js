@@ -1,162 +1,149 @@
-// =========================
-// GLOBAL VARIABLES
-// =========================
+//map.js - script del mapa de la pagina web que dibujara los overlays, estaciones y trazos y manejara los inputs y outputs
 
-let startStation = null;
-let endStation = null;
-let stations = {};
+// Variables globales
 
-let mapContainer = document.getElementById("overlay");
-let resultDiv = document.getElementById("result");
-let stepsDiv = document.getElementById("steps");
+let inicio = null;
+let fin = null;
+let estaciones = {};
 
-const MAP_WIDTH = 396;
-const MAP_HEIGHT = 443;
+const capaEstaciones = document.getElementById("estaciones");
+const divResultado = document.getElementById("resultado");
+const divPasos = document.getElementById("lista-pasos");
 
-// =========================
-// LOAD STATIONS FROM JSON
-// =========================
+const ANCHO_MAPA = 396;
+const ALTO_MAPA = 443;
+
+// Cargar estaciones con sus respectivos datos (coordenadas, color, linea y nombre)
 
 fetch("/static/lines.json")
   .then(r => r.json())
-  .then(data => drawStations(data));
+  .then(data => dibujarEstaciones(data));
 
-function drawStations(data) {
-  console.log("Drawing stations...");
+function dibujarEstaciones(data) {
 
-  for (const [line, info] of Object.entries(data)) {
+  for (const [linea, info] of Object.entries(data)) {
+
     const color = info.color;
 
-    for (const [name, pos] of Object.entries(info.stations)) {
+    for (const [nombre, pos] of Object.entries(info.stations)) {
+
       const [xr, yr] = pos;
+      const x = xr * ANCHO_MAPA;
+      const y = yr * ALTO_MAPA;
 
-      // Convertir a pixeles exactos según la imagen
-      const x = xr * MAP_WIDTH;
-      const y = yr * MAP_HEIGHT;
+      estaciones[nombre] = { x, y, linea, color };
 
-      stations[name] = { x, y, line, color };
+      const punto = document.createElement("div");
+      punto.className = "estacion";
+      punto.style.left = x + "px";
+      punto.style.top = y + "px";
+      punto.style.backgroundColor = color;
+      punto.title = nombre;
 
-      const btn = document.createElement("div");
-      btn.className = "station-btn";
-      btn.style.left = x + "px";
-      btn.style.top = y + "px";
-      btn.style.backgroundColor = color;
-      btn.title = name;
+      punto.addEventListener("click", () => seleccionar(nombre));
 
-      btn.addEventListener("click", () => selectStation(name));
-
-      mapContainer.appendChild(btn);
+      capaEstaciones.appendChild(punto);
     }
   }
-
-  console.log("Stations drawn:", Object.keys(stations).length);
 }
 
-// =========================
-// STATION SELECTION
-// =========================
+// Selección de estaciones
 
-function selectStation(name) {
-  if (!startStation) {
-    startStation = name;
-    highlightStation(name, "#00ff00");
-    resultDiv.textContent = `Origen: ${name}`;
-  } else if (!endStation) {
-    endStation = name;
-    highlightStation(name, "#ff0000");
-    resultDiv.textContent += ` → Destino: ${name}`;
-    calculateRoute();
-  } else {
-    resetSelection();
-    selectStation(name);
+function seleccionar(nombre) {
+
+  if (!inicio) {
+    inicio = nombre;
+    resaltar(nombre, "#00ff00");
+    divResultado.textContent = `Inicio: ${nombre}`;
+  }
+  else if (!fin) {
+    fin = nombre;
+    resaltar(nombre, "#ff0000");
+    divResultado.textContent += ` → Fin: ${nombre}`;
+    calcularRuta();
+  }
+  else {
+    reiniciar();
+    seleccionar(nombre);
   }
 }
 
-function highlightStation(name, color) {
-  document.querySelectorAll(".station-btn").forEach(btn => {
-    if (btn.title === name) {
-      btn.style.borderColor = color;
-      btn.style.boxShadow = `0 0 10px ${color}`;
+function resaltar(nombre, color) {
+  document.querySelectorAll(".estacion").forEach(e => {
+    if (e.title === nombre) {
+      e.style.borderColor = color;
+      e.style.boxShadow = `0 0 10px ${color}`;
     }
   });
 }
 
-function resetSelection() {
-  startStation = null;
-  endStation = null;
-  resultDiv.textContent = "";
-  stepsDiv.innerHTML = "";
-  document.getElementById("route-line").innerHTML = "";
+function reiniciar() {
+  inicio = null;
+  fin = null;
+  divResultado.textContent = "";
+  divPasos.innerHTML = "";
+  document.getElementById("ruta").innerHTML = "";
 
-  document.querySelectorAll(".station-btn").forEach(btn => {
-    btn.style.borderColor = "white";
-    btn.style.boxShadow = "none";
+  document.querySelectorAll(".estacion").forEach(e => {
+    e.style.borderColor = "white";
+    e.style.boxShadow = "none";
   });
 }
 
-// =========================
-// CALCULATE ROUTE
-// =========================
+// Llamar al backend
 
-function calculateRoute() {
-  fetch("/route", {
+function calcularRuta() {
+  fetch("/ruta", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ start: startStation, end: endStation })
+    body: JSON.stringify({ inicio, fin })
   })
     .then(r => r.json())
     .then(data => {
-      drawRoute(data.steps);
-      showSteps(data.steps);
-      resultDiv.textContent += ` — Tiempo total: ${data.distance} min`;
+      dibujarRuta(data.pasos);
+      mostrarPasos(data.pasos);
+      divResultado.textContent += ` — Tiempo total: ${data.tiempo_total} min`;
     });
 }
 
-// =========================
-// DRAW ROUTE
-// =========================
+// Dibujar ruta
 
-function drawRoute(steps) {
-  const svg = document.getElementById("route-line");
+function dibujarRuta(pasos) {
+  const svg = document.getElementById("ruta");
   svg.innerHTML = "";
 
-  steps.forEach(step => {
-    const a = stations[step.from];
-    const b = stations[step.to];
+  pasos.forEach(p => {
 
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    const a = estaciones[p.desde];
+    const b = estaciones[p.hasta];
 
-    line.setAttribute("x1", a.x);
-    line.setAttribute("y1", a.y);
-    line.setAttribute("x2", b.x);
-    line.setAttribute("y2", b.y);
+    const linea = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    linea.setAttribute("x1", a.x);
+    linea.setAttribute("y1", a.y);
+    linea.setAttribute("x2", b.x);
+    linea.setAttribute("y2", b.y);
 
-    if (step.type === "rail")
-      line.setAttribute("stroke", "#ff3333");
-    else if (step.type === "transfer")
-      line.setAttribute("stroke", "yellow");
-    else if (step.type === "walk")
-      line.setAttribute("stroke", "#33aaff");
-    else if (step.type === "boarding")
-      line.setAttribute("stroke", "white");
+    if (p.tipo === "metro")
+      linea.setAttribute("stroke", "#ff3333");
+    else if (p.tipo === "transbordo")
+      linea.setAttribute("stroke", "yellow");
+    else if (p.tipo === "caminar")
+      linea.setAttribute("stroke", "#33aaff");
+    else if (p.tipo === "abordar")
+      linea.setAttribute("stroke", "white");
 
-    line.setAttribute("stroke-width", "3");
-    svg.appendChild(line);
+    linea.setAttribute("stroke-width", "3");
+    svg.appendChild(linea);
   });
 }
 
-// =========================
-// SHOW STEP LIST
-// =========================
+// Mostrar lista de pasos
 
-function showSteps(steps) {
-  stepsDiv.innerHTML = "";
-
-  steps.forEach(step => {
-    const div = document.createElement("div");
-    div.textContent = `${step.from} → ${step.to} : ${step.time} min (${step.type})`;
-    stepsDiv.appendChild(div);
+function mostrarPasos(pasos) {
+  divPasos.innerHTML = "";
+  pasos.forEach(p => {
+    const d = document.createElement("div");
+    d.textContent = `${p.desde} → ${p.hasta} : ${p.tiempo} min (${p.tipo})`;
+    divPasos.appendChild(d);
   });
 }
-
-console.log("map.js loaded successfully");

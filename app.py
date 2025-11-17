@@ -1,193 +1,189 @@
-# app.py
+# app.py — Back-end del sistema de rutas Metro CDMX
+
 from flask import Flask, render_template, request, jsonify
 import json, os
 import networkx as nx
-from collections import defaultdict
 import math
+from collections import defaultdict
 
 app = Flask(__name__)
 
-# ===============================
-# CONFIG
-# ===============================
+# CONFIGURACIÓN
 
-IMG_W = 396
-IMG_H = 443
+ANCHO_IMG = 396
+ALTO_IMG = 443
 
-WALK_SPEED = 5
-BOARD_TIME  = 2
-TIME_BETWEEN_STATIONS = 2
-TIME_TRANSFER = 5
+VELOCIDAD_CAMINAR = 5           # pixeles por minuto
+TIEMPO_ABORDAR = 2              # minutos por subir al metro
+TIEMPO_ENTRE_ESTACIONES = 2     # minutos
+TIEMPO_TRANSBORDO = 5           # minutos para cambiar de metro
 
-# ===============================
-# LOAD JSON
-# ===============================
+# CARGAR ARCHIVO JSON
 
-BASE_DIR = os.path.dirname(__file__)
-with open(os.path.join(BASE_DIR, "static", "lines.json"), "r", encoding="utf-8") as f:
-    LINES = json.load(f)
+BASE = os.path.dirname(__file__)
+with open(os.path.join(BASE, "static", "lines.json"), "r", encoding="utf-8") as f:
+    LINEAS = json.load(f)
 
-# ===============================
-# BUILD GRAPH
-# ===============================
+# CONSTRUIR GRAFO
 
 G = nx.Graph()
 
-for line_name, info in LINES.items():
-    stations = list(info["stations"].keys())
+estaciones_globales = {}
 
-    for i, st in enumerate(stations):
+for nombre_linea, info in LINEAS.items():
+    estaciones = list(info["stations"].keys())
 
-        # Convert relative → pixels
-        xr, yr = info["stations"][st]
-        px = xr * IMG_W
-        py = yr * IMG_H
+    for i, est in enumerate(estaciones):
+        xr, yr = info["stations"][est]
+        px = xr * ANCHO_IMG
+        py = yr * ALTO_IMG
 
-        node = (st, line_name)
-        G.add_node(node, station=st, line=line_name, pos=(px, py))
+        # Guardar posición única global
+        estaciones_globales[est] = (px, py)
 
-        # Connect consecutive stations in same line
+        nodo = (est, nombre_linea)
+        G.add_node(nodo, estacion=est, linea=nombre_linea, pos=(px, py))
+
         if i > 0:
-            prev = (stations[i - 1], line_name)
-            G.add_edge(prev, node,
-                       weight=TIME_BETWEEN_STATIONS,
-                       type="rail",
-                       line=line_name)
+            nodo_prev = (estaciones[i - 1], nombre_linea)
+            G.add_edge(
+                nodo_prev, nodo,
+                peso=TIEMPO_ENTRE_ESTACIONES,
+                tipo="metro"
+            )
 
-# Map station -> multiple nodes (lines)
-station_to_nodes = defaultdict(list)
-for node in G.nodes():
-    station_to_nodes[node[0]].append(node)
+# Crear mapa estación → nodos (para transbordos)
+estacion_a_nodos = defaultdict(list)
+for nodo in G.nodes():
+    est = nodo[0]
+    estacion_a_nodos[est].append(nodo)
 
-# Transfers
-for st, nodes in station_to_nodes.items():
-    if len(nodes) > 1:
-        for i in range(len(nodes)):
-            for j in range(i + 1, len(nodes)):
-                G.add_edge(nodes[i], nodes[j],
-                           weight=TIME_TRANSFER, type="transfer")
+# Transbordos
+for est, nodos in estacion_a_nodos.items():
+    if len(nodos) > 1:
+        for i in range(len(nodos)):
+            for j in range(i + 1, len(nodos)):
+                G.add_edge(
+                    nodos[i], nodos[j],
+                    peso=TIEMPO_TRANSBORDO,
+                    tipo="transbordo"
+                )
 
-# ===============================
-# DISTANCES
-# ===============================
+# FUNCIONES DE DISTANCIA
 
-def pixel_distance(a, b):
+def distancia_pixeles(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
-def walking_time(a, b):
-    return pixel_distance(a, b) / WALK_SPEED
+def tiempo_caminando(a, b):
+    return distancia_pixeles(a, b) / VELOCIDAD_CAMINAR
 
-def station_pixel_position(st):
-    xs = ys = 0
-    for node in station_to_nodes[st]:
-        x, y = G.nodes[node]["pos"]
-        xs += x
-        ys += y
-    return xs / len(station_to_nodes[st]), ys / len(station_to_nodes[st])
+# A* EN MINUTOS
 
-# ===============================
-# A* ROUTING
-# ===============================
+def calcular_mejor_ruta(origen, destino):
 
-def find_best_path(origin, destination):
+    pos_origen = estaciones_globales[origen]
+    pos_destino = estaciones_globales[destino]
 
-    origin_pos = station_pixel_position(origin)
-    dest_pos   = station_pixel_position(destination)
+    # Caminata directa
+    tiempo_caminata = tiempo_caminando(pos_origen, pos_destino)
 
-    walk_direct = walking_time(origin_pos, dest_pos)
+    # Construcción del grafo temporal
+    ORI, FIN = ("ORI", "ORI"), ("FIN", "FIN")
+    GT = G.copy()
+    GT.add_node(ORI)
+    GT.add_node(FIN)
 
-    # Build temporary graph
-    SRC, TGT = ("SRC", "SRC"), ("TGT", "TGT")
-    Gtmp = G.copy()
-    Gtmp.add_node(SRC)
-    Gtmp.add_node(TGT)
+    # Entra al metro solo desde el origen
+    for nodo in estacion_a_nodos[origen]:
+        GT.add_edge(
+            ORI, nodo,
+            peso=TIEMPO_ABORDAR,
+            tipo="abordar"
+        )
 
-    # Enter metro
-    for n in station_to_nodes[origin]:
-        Gtmp.add_edge(SRC, n, weight=BOARD_TIME, type="boarding")
+    # Conecta destino
+    for nodo in estacion_a_nodos[destino]:
+        GT.add_edge(
+            nodo, FIN,
+            peso=0
+        )
 
-    for n in station_to_nodes[destination]:
-        Gtmp.add_edge(n, TGT, weight=0)
-
-    # Heuristic
-    def h(a, b):
-        if a in (SRC, TGT):
+    # Heurística (en minutos)
+    def heuristica(actual, objetivo):
+        if actual in (ORI, FIN):
             return 0
-        pa = Gtmp.nodes[a]["pos"]
-        return walking_time(pa, dest_pos)
+        px = GT.nodes[actual]["pos"]
+        return tiempo_caminando(px, pos_destino)
 
+    # Intentar A*
     try:
-        raw_path = nx.astar_path(Gtmp, SRC, TGT, heuristic=h, weight="weight")
+        ruta_raw = nx.astar_path(GT, ORI, FIN, heuristic=heuristica, weight="peso")
     except:
         return None
 
-    # Steps
-    steps = []
-    for a, b in zip(raw_path[:-1], raw_path[1:]):
-        if a in (SRC, TGT) or b in (SRC, TGT):
+    # Convertir ruta a pasos legibles
+    pasos = []
+    for a, b in zip(ruta_raw[:-1], ruta_raw[1:]):
+        if a in (ORI, FIN) or b in (ORI, FIN):
             continue
 
-        st1, _ = a
-        st2, _ = b
+        est1, _ = a
+        est2, _ = b
 
-        t = Gtmp[a][b]["weight"]
-        step_type = Gtmp[a][b].get("type", "rail")
+        t = GT[a][b]["peso"]
+        tipo = GT[a][b].get("tipo", "metro")
 
-        steps.append({
-            "from": st1,
-            "to": st2,
-            "time": round(t, 2),
-            "type": step_type
+        pasos.append({
+            "desde": est1,
+            "hasta": est2,
+            "tiempo": round(t, 2),
+            "tipo": tipo
         })
 
-    metro_time = sum(s["time"] for s in steps)
+    tiempo_metro = sum(p["tiempo"] for p in pasos)
 
     return {
-        "steps": steps,
-        "distance": round(metro_time, 2),
-        "walk_direct": round(walk_direct, 2)
+        "pasos": pasos,
+        "tiempo_total": round(tiempo_metro, 2),
+        "tiempo_caminando": round(tiempo_caminata, 2)
     }
 
-
-# ===============================
-# API ROUTES
-# ===============================
+# ROUTES DEL FLASK
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route("/route", methods=["POST"])
-def route():
+@app.route("/ruta", methods=["POST"])
+def ruta():
 
-    data = request.get_json()
-    start = data.get("start")
-    end   = data.get("end")
+    datos = request.get_json() or {}
 
-    result = find_best_path(start, end)
+    origen = datos.get("inicio")
+    destino = datos.get("fin")
 
-    if result is None:
-        return jsonify({"error": "Ruta no encontrada"}), 404
+    if not origen or not destino:
+        return jsonify({"error": "Debes enviar 'inicio' y 'fin'"}), 400
 
-    # 👇👇👇 OPTION A — WALK DIRECT IF FASTER
-    if result["walk_direct"] < result["distance"]:
-        walk = result["walk_direct"]
+    resultado = calcular_mejor_ruta(origen, destino)
+    if resultado is None:
+        return jsonify({"error": "No existe ruta válida"}), 404
+
+    # CAMINAR DIRECTO SI ES MÁS RÁPIDO
+    if resultado["tiempo_caminando"] < resultado["tiempo_total"]:
+        t = resultado["tiempo_caminando"]
         return jsonify({
-            "steps": [{
-                "from": start,
-                "to": end,
-                "time": round(walk, 2),
-                "type": "walk"
+            "pasos": [{
+                "desde": origen,
+                "hasta": destino,
+                "tiempo": round(t, 2),
+                "tipo": "caminar"
             }],
-            "distance": round(walk, 2),
-            "walk_direct": round(walk, 2)
+            "tiempo_total": round(t, 2)
         })
 
-    return jsonify(result)
+    return jsonify(resultado)
 
-# ===============================
-# RUN
-# ===============================
 
 if __name__ == "__main__":
     app.run(debug=True)

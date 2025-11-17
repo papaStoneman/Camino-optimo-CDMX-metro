@@ -4,18 +4,18 @@ body {
   text-align: center;
 }
 
-#map-container {
+#mapa {
   position: relative;
   display: inline-block;
 }
 
-#metro-map {
+#imagen-metro {
   width: 396px;
   height: 443px;
   display: block;
 }
 
-#route-line {
+#ruta {
   position: absolute;
   left: 0;
   top: 0;
@@ -25,7 +25,7 @@ body {
   z-index: 2;
 }
 
-#overlay {
+#estaciones {
   position: absolute;
   left: 0;
   top: 0;
@@ -34,7 +34,7 @@ body {
   z-index: 3;
 }
 
-.station-btn {
+.estacion {
   position: absolute;
   width: 12px;
   height: 12px;

@@ -1,4 +1,4 @@
-# app.py — Back-end del sistema de rutas Metro CDMX
+# app.py — Servidor Flask que calcula la ruta óptima (A* en dos fases)
 
 from flask import Flask, render_template, request, jsonify
 import json, os
@@ -8,195 +8,206 @@ from collections import defaultdict
 
 app = Flask(__name__)
 
-# CONFIGURACIÓN
-
+# ----- Configuración y constantes -----
+# Dimensiones del mapa (coordenadas normalizadas * ANCHO/ALTO para obtener px)
 ANCHO_IMG = 1096
 ALTO_IMG = 1269
 
-VELOCIDAD_CAMINAR = 5           # pixeles por minuto
-TIEMPO_ABORDAR = 2              # minutos por subir al metro
-TIEMPO_ENTRE_ESTACIONES = 2     # minutos
-TIEMPO_TRANSBORDO = 5           # minutos para cambiar de metro
+# Parámetros temporales (minutos)
+VELOCIDAD_CAMINAR = 5          # px/min (velocidad ficticia para cálculo en px)
+TIEMPO_SALIR = 1               # tiempo para salir de estación (min)
+TIEMPO_ENTRE_EST = 2           # tiempo entre estaciones por metro (min)
+TIEMPO_TRANSBORDO = 5          # tiempo por transbordo entre líneas (min)
 
-# CARGAR ARCHIVO JSON
-
+# Cargar datos estáticos de estaciones/lineas
 BASE = os.path.dirname(__file__)
 with open(os.path.join(BASE, "static", "lines.json"), "r", encoding="utf-8") as f:
     LINEAS = json.load(f)
 
-# CONSTRUIR GRAFO
+# ----- Construir grafo puro de metro -----
+G = nx.Graph()                          # grafo que representa únicamente conexiones de metro
+pos_nodo = {}                           # mapa nodo -> (x_px, y_px)
+estacion_a_nodos = defaultdict(list)    # mapa estacion_nombre -> lista de nodos (estación, linea)
 
-G = nx.Graph()
-
-# NUEVO: En vez de estaciones_globales por nombre, ahora guardamos por nodo completo
-posiciones_nodos = {}
-
-# Mapa "estación → nodos" para identificar transbordos
-estacion_a_nodos = defaultdict(list)
-
-for nombre_linea, info in LINEAS.items():
-    estaciones = list(info["stations"].keys())
-
-    for i, est in enumerate(estaciones):
+for linea, info in LINEAS.items():
+    ests = list(info["stations"].keys())
+    for i, est in enumerate(ests):
         xr, yr = info["stations"][est]
         px = xr * ANCHO_IMG
         py = yr * ALTO_IMG
+        nodo = (est, linea)
 
-        nodo = (est, nombre_linea)
-
-        # Guardar posición única
-        posiciones_nodos[nodo] = (px, py)
-
-        G.add_node(
-            nodo,
-            estacion=est,
-            linea=nombre_linea,
-            pos=(px, py)
-        )
-
+        pos_nodo[nodo] = (px, py)
         estacion_a_nodos[est].append(nodo)
 
-        # Conectar con la estación anterior de la misma línea
-        if i > 0:
-            nodo_prev = (estaciones[i - 1], nombre_linea)
-            G.add_edge(
-                nodo_prev, nodo,
-                peso=TIEMPO_ENTRE_ESTACIONES,
-                tipo="metro"
-            )
+        # cada nodo identifica estación + línea para permitir transbordos
+        G.add_node(nodo, estacion=est, linea=linea)
 
-# AGREGAR TRANSBORDOS ENTRE NODOS CON MISMO NOMBRE PERO DE OTRA LÍNEA
+        # arista entre estaciones consecutivas en la misma línea
+        if i > 0:
+            prev = (ests[i-1], linea)
+            G.add_edge(prev, nodo, peso=TIEMPO_ENTRE_EST, tipo="metro")
+
+# transbordos
 for est, nodos in estacion_a_nodos.items():
+    # si una estación aparece en varias líneas, añadir aristas de transbordo
     if len(nodos) > 1:
         for i in range(len(nodos)):
-            for j in range(i + 1, len(nodos)):
-                G.add_edge(
-                    nodos[i], nodos[j],
-                    peso=TIEMPO_TRANSBORDO,
-                    tipo="transbordo"
-                )
+            for j in range(i+1, len(nodos)):
+                G.add_edge(nodos[i], nodos[j], peso=TIEMPO_TRANSBORDO, tipo="transbordo")
 
 
-# FUNCIONES AUXILIARES
+# ----- Utilidades -----
+def dist(a, b):
+    # distancia euclidiana en px entre dos posiciones (x,y)
+    return math.hypot(a[0]-b[0], a[1]-b[1])
 
-def distancia_pixeles(a, b):
-    return math.hypot(a[0] - b[0], a[1] - b[1])
-
-def tiempo_caminando(a, b):
-    return distancia_pixeles(a, b) / VELOCIDAD_CAMINAR
+def tiempo_caminando(a_pos, b_pos):
+    # convierte distancia px -> tiempo (min) usando VELOCIDAD_CAMINAR
+    return dist(a_pos, b_pos) / VELOCIDAD_CAMINAR
 
 
-# CÁLCULO DE RUTAS
-
+# --------- ALGORITMO DE DOS FASES ---------
 def calcular_mejor_ruta(origen, destino):
+    """
+    Calcula la mejor ruta entre `origen` y `destino` en dos fases:
+    1) Buscar la mejor ruta usando solo el grafo metro (heurística 0) para obtener
+       la secuencia de nodos esperada en metro (ruta_metro).
+    2) Construir un grafo extendido que agrega un nodo ORI (calle de inicio) y
+       un nodo FIN (calle destino). Conectar cada nodo a FIN con coste salir+caminar.
+       Ejecutar A* usando una heurística basada en distancias por metro (Dijkstra)
+       hacia las estaciones destino, añadiendo TIEMPO_SALIR como estimación.
+    Devuelve dict con lista de pasos y tiempo total en minutos.
+    """
 
-    # Obtener nodos reales del origen y destino
-    nodos_origen = estacion_a_nodos.get(origen)
-    nodos_destino = estacion_a_nodos.get(destino)
+    nodos_origen = estacion_a_nodos[origen]
+    nodos_destino = estacion_a_nodos[destino]
 
-    if not nodos_origen or not nodos_destino:
+    # posiciones px para cálculo de caminata
+    pos_origen = pos_nodo[nodos_origen[0]]
+    pos_destino = pos_nodo[nodos_destino[0]]
+
+    # ----- Fase 1: ruta óptima en el grafo metro puro -----
+    def h0(a, b):  # heurística nula => Dijkstra equivalente
+        return 0
+
+    rutas_metro = []
+    for o in nodos_origen:
+        for d in nodos_destino:
+            try:
+                ruta = nx.astar_path(G, o, d, heuristic=h0, weight="peso")
+                rutas_metro.append((ruta, nx.path_weight(G, ruta, "peso")))
+            except:
+                # ignorar pares desconectados
+                pass
+
+    if not rutas_metro:
         return None
 
-    # Usar el primer nodo para calcular caminata a destino
-    pos_origen = posiciones_nodos[nodos_origen[0]]
-    pos_destino = posiciones_nodos[nodos_destino[0]]
+    ruta_metro, tiempo_metro = min(rutas_metro, key=lambda x: x[1])
+    ruta_metro_set = set(ruta_metro)
 
-    tiempo_caminata = tiempo_caminando(pos_origen, pos_destino)
-
-    # Grafo temporal para el A*
-    ORI, FIN = ("ORI", "ORI"), ("FIN", "FIN")
+    # ----- Fase 2: construir grafo extendido con ORI/FIN y opciones de caminar -----
     GT = G.copy()
-    GT.add_node(ORI)
+
+    FIN = ("FIN","FIN")
     GT.add_node(FIN)
 
-    # Conectar origen virtual
+    # conectar cada nodo del grafo a FIN: si nodo es estación destino -> coste 0,
+    # si no -> coste = tiempo para salir + tiempo de caminar desde esa estación hasta destino
+    for nodo in GT.nodes():
+        if nodo == FIN: continue
+        p = pos_nodo.get(nodo)
+        if not p: continue
+
+        if nodo in nodos_destino:
+            GT.add_edge(nodo, FIN, peso=0, tipo="llegada")
+        else:
+            caminar = tiempo_caminando(p, pos_destino)
+            GT.add_edge(nodo, FIN, peso=TIEMPO_SALIR + caminar, tipo="caminar")
+
+    # nodo virtual de origen (usuario en la calle)
+    ORI = ("ORI","ORI")
+    GT.add_node(ORI)
+
     for nodo in nodos_origen:
-        GT.add_edge(
-            ORI, nodo,
-            peso=TIEMPO_ABORDAR,
-            tipo="abordar"
-        )
+        # coste caminar desde la posición de inicio hasta la estación elegida
+        p = pos_nodo[nodo]
+        t = tiempo_caminando(pos_origen, p)
+        GT.add_edge(ORI, nodo, peso=t, tipo="caminar")
 
-    # Conectar destino virtual
-    for nodo in nodos_destino:
-        GT.add_edge(
-            nodo, FIN,
-            peso=0
-        )
-
-    # Heurística A*
-    def heuristica(actual, objetivo):
-        if actual in (ORI, FIN):
-            return 0
-        px = GT.nodes[actual]["pos"]
-        return tiempo_caminando(px, pos_destino)
-
+    # ----- Construir heurística informada usando Dijkstra sobre el grafo metro -----
+    # metro_dist_to_dest[n] = coste mínimo por metro desde n hasta cualquier estación destino
     try:
-        ruta_raw = nx.astar_path(GT, ORI, FIN, heuristic=heuristica, weight="peso")
-    except:
-        return None
+        metro_dist_to_dest = nx.multi_source_dijkstra_path_length(G, nodos_destino, weight="peso")
+    except Exception:
+        metro_dist_to_dest = {}
 
+    def h(n, goal):
+        # si existe camino por metro: coste metro restante + TIEMPO_SALIR
+        if n == ORI or n == FIN:
+            return 0
+
+        if n in metro_dist_to_dest:
+            return metro_dist_to_dest[n] + TIEMPO_SALIR
+
+        # fallback conservador: salir + caminar desde la posición del nodo
+        p = pos_nodo.get(n)
+        if not p:
+            return 0
+        return TIEMPO_SALIR + tiempo_caminando(p, pos_destino)
+
+    # ejecutar A* sobre el grafo extendido
+    ruta_final = nx.astar_path(GT, ORI, FIN, heuristic=h, weight="peso")
+
+    # reconstrucción de pasos legibles para la UI
     pasos = []
-    for a, b in zip(ruta_raw[:-1], ruta_raw[1:]):
-        if a in (ORI, FIN) or b in (ORI, FIN):
+    total = 0
+
+    for a, b in zip(ruta_final[:-1], ruta_final[1:]):
+        if a == ORI and b != FIN:
+            # primer paso: caminar desde la calle hasta estación de origen
+            est = b[0]
+            t = GT[a][b]["peso"]
+            pasos.append({"desde": origen, "hasta": est, "tiempo": round(t,2), "tipo": "caminar"})
+            total += t
             continue
 
-        est1, _ = a
-        est2, _ = b
-        t = GT[a][b]["peso"]
-        tipo = GT[a][b].get("tipo", "metro")
+        if b == FIN:
+            # última transición: bajar y/o caminar hasta destino
+            est = a[0]
+            t = GT[a][b]["peso"]
+            tipo = GT[a][b]["tipo"]
+            pasos.append({"desde": est, "hasta": destino, "tiempo": round(t,2), "tipo": tipo})
+            total += t
+            continue
 
+        # pasos regulares entre estaciones (metro/transbordo)
+        t = GT[a][b]["peso"]
+        tipo = GT[a][b].get("tipo","metro")
         pasos.append({
-            "desde": est1,
-            "hasta": est2,
-            "tiempo": round(t, 2),
+            "desde": a[0],
+            "hasta": b[0],
+            "tiempo": round(t,2),
             "tipo": tipo
         })
+        total += t
 
-    tiempo_metro = sum(p["tiempo"] for p in pasos)
-
-    return {
-        "pasos": pasos,
-        "tiempo_total": round(tiempo_metro, 2),
-        "tiempo_caminando": round(tiempo_caminata, 2)
-    }
+    return {"pasos": pasos, "tiempo_total": round(total,2)}
 
 
-# ROUTES DEL FLASK
-
+# ----- FLASK -----
 @app.route("/")
 def index():
     return render_template("index.html")
 
 @app.route("/ruta", methods=["POST"])
 def ruta():
-    datos = request.get_json() or {}
-
-    origen = datos.get("inicio")
-    destino = datos.get("fin")
-
-    if not origen or not destino:
-        return jsonify({"error": "Debes enviar 'inicio' y 'fin'"}), 400
-
-    resultado = calcular_mejor_ruta(origen, destino)
-    if resultado is None:
-        return jsonify({"error": "No existe ruta válida"}), 404
-
-    # Si caminar es más rápido que el metro
-    if resultado["tiempo_caminando"] < resultado["tiempo_total"]:
-        t = resultado["tiempo_caminando"]
-        return jsonify({
-            "pasos": [{
-                "desde": origen,
-                "hasta": destino,
-                "tipo": "caminar",
-                "tiempo": round(t, 2)
-            }],
-            "tiempo_total": round(t, 2)
-        })
-
-    return jsonify(resultado)
-
+    data = request.get_json()
+    orig = data.get("inicio")
+    dest = data.get("fin")
+    r = calcular_mejor_ruta(orig, dest)
+    return jsonify(r)
 
 if __name__ == "__main__":
     app.run(debug=True)

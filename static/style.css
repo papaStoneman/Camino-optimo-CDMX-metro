@@ -1,3 +1,7 @@
+/* style.css - estilos mínimos para el mapa y overlays
+   Notas: las dimensiones de #imagen-metro, #ruta y #estaciones son fijas
+   y deben coincidir con las constantes del backend y JS (ANCHO/ALTO). */
+
 body {
   background: #111;
   color: #fff;
@@ -9,22 +13,25 @@ body {
   display: inline-block;
 }
 
+/* Imagen base del mapa: dimensiones fijas para coordenadas en px */
 #imagen-metro {
   width: 1096px;
   height: 1269px;
   display: block;
 }
 
+/* SVG sobre la imagen donde se dibujan las líneas de la ruta */
 #ruta {
   position: absolute;
   left: 0;
   top: 0;
   width: 1096px;
   height: 1269px;
-  pointer-events: none;
+  pointer-events: none; /* evitar capturar clicks sobre el SVG */
   z-index: 2;
 }
 
+/* Contenedor para los puntos interactivos de estaciones */
 #estaciones {
   position: absolute;
   left: 0;

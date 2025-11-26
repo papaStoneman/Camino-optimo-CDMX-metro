@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Camino Óptimo Metro CDMX</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <!-- Página mínima: el mapa es una imagen con un SVG encima para la ruta y un contenedor
+       donde JS añade elementos de estación. -->
 </head>
 <body>
 
@@ -12,17 +14,22 @@
 
   <div id="mapa">
 
+    <!-- imagen base del mapa; dimensiones fijas que el CSS y el backend asumen -->
     <img id="imagen-metro" src="/static/map.png" alt="Mapa Metro CDMX">
 
+    <!-- SVG para dibujar la ruta (líneas entre estaciones) -->
     <svg id="ruta"></svg>
 
+    <!-- Contenedor donde JS insertará puntos interactivos para cada estación -->
     <div id="estaciones"></div>
 
   </div>
 
+  <!-- Resultados y lista de pasos que rellena el cliente JS -->
   <div id="resultado"></div>
   <div id="lista-pasos"></div>
 
+  <!-- Lógica del cliente: carga estaciones, maneja selección y pide rutas al backend -->
   <script src="/static/map.js"></script>
 </body>
 </html>

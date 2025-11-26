@@ -1,32 +1,27 @@
-//map.js - script del mapa de la pagina web que dibujara los overlays, estaciones y trazos y manejara los inputs y outputs
+// map.js - control de la UI del mapa y comunicación con el backend
 
-// Variables globales
-
-let inicio = null;
-let fin = null;
-let estaciones = {};
+// Estado global mínimo
+let inicio = null;    // nombre de estación inicio seleccionado
+let fin = null;       // nombre de estación fin seleccionado
+let estaciones = {};  // mapa nombre -> {x,y,linea,color}
 
 const capaEstaciones = document.getElementById("estaciones");
 const divResultado = document.getElementById("resultado");
 const divPasos = document.getElementById("lista-pasos");
 
-const ANCHO_MAPA = 1096;
+const ANCHO_MAPA = 1096;       // debe coincidir con dimensiones en backend
 const ALTO_MAPA = 1269;
 
-// Cargar estaciones con sus respectivos datos (coordenadas, color, linea y nombre)
-
+// Cargar estaciones (archivo JSON) y dibujarlas como puntos interactivos
 fetch("/static/lines.json")
   .then(r => r.json())
   .then(data => dibujarEstaciones(data));
 
 function dibujarEstaciones(data) {
-
+  // cada estación se representa como un div posicionado sobre el mapa
   for (const [linea, info] of Object.entries(data)) {
-
     const color = info.color;
-
     for (const [nombre, pos] of Object.entries(info.stations)) {
-
       const [xr, yr] = pos;
       const x = xr * ANCHO_MAPA;
       const y = yr * ALTO_MAPA;
@@ -40,6 +35,7 @@ function dibujarEstaciones(data) {
       punto.style.backgroundColor = color;
       punto.title = nombre;
 
+      // click selecciona inicio/fin
       punto.addEventListener("click", () => seleccionar(nombre));
 
       capaEstaciones.appendChild(punto);
@@ -47,10 +43,8 @@ function dibujarEstaciones(data) {
   }
 }
 
-// Selección de estaciones
-
+// Primer click = inicio, segundo = fin
 function seleccionar(nombre) {
-
   if (!inicio) {
     inicio = nombre;
     resaltar(nombre, "#00ff00");
@@ -60,7 +54,7 @@ function seleccionar(nombre) {
     fin = nombre;
     resaltar(nombre, "#ff0000");
     divResultado.textContent += ` → Fin: ${nombre}`;
-    calcularRuta();
+    calcularRuta(); // pedir ruta al backend cuando ya tenemos origen y destino
   }
   else {
     reiniciar();
@@ -69,6 +63,7 @@ function seleccionar(nombre) {
 }
 
 function resaltar(nombre, color) {
+  // efecto visual para la estación seleccionada
   document.querySelectorAll(".estacion").forEach(e => {
     if (e.title === nombre) {
       e.style.borderColor = color;
@@ -78,6 +73,7 @@ function resaltar(nombre, color) {
 }
 
 function reiniciar() {
+  // limpiar UI y estado
   inicio = null;
   fin = null;
   divResultado.textContent = "";
@@ -90,8 +86,7 @@ function reiniciar() {
   });
 }
 
-// Llamar al backend
-
+// Envío al backend: POST /ruta con inicio/fin -> recibe {pasos, tiempo_total}
 function calcularRuta() {
   fetch("/ruta", {
     method: "POST",
@@ -100,20 +95,19 @@ function calcularRuta() {
   })
     .then(r => r.json())
     .then(data => {
+      // dibujar y mostrar pasos recibidos
       dibujarRuta(data.pasos);
       mostrarPasos(data.pasos);
       divResultado.textContent += ` — Tiempo total: ${data.tiempo_total} min`;
     });
 }
 
-// Dibujar ruta
-
+// Dibuja líneas SVG entre estaciones según pasos
 function dibujarRuta(pasos) {
   const svg = document.getElementById("ruta");
   svg.innerHTML = "";
 
   pasos.forEach(p => {
-
     const a = estaciones[p.desde];
     const b = estaciones[p.hasta];
 
@@ -123,6 +117,7 @@ function dibujarRuta(pasos) {
     linea.setAttribute("x2", b.x);
     linea.setAttribute("y2", b.y);
 
+    // color por tipo de paso para distinguir visualmente
     if (p.tipo === "metro")
       linea.setAttribute("stroke", "#ff3333");
     else if (p.tipo === "transbordo")
@@ -137,8 +132,7 @@ function dibujarRuta(pasos) {
   });
 }
 
-// Mostrar lista de pasos
-
+// Pinta la lista textual de pasos en la UI
 function mostrarPasos(pasos) {
   divPasos.innerHTML = "";
   pasos.forEach(p => {

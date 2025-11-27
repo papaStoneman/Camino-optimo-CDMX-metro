@@ -9,12 +9,8 @@ from collections import defaultdict
 app = Flask(__name__)
 
 # ----- Configuración y constantes -----
-# Dimensiones del mapa (coordenadas normalizadas * ANCHO/ALTO para obtener px)
-ANCHO_IMG = 1096
-ALTO_IMG = 1269
-
 # Parámetros temporales (minutos)
-VELOCIDAD_CAMINAR = 5          # px/min (velocidad ficticia para cálculo en px)
+VELOCIDAD_CAMINAR = 67         # m/min (aprox 4 km/h)
 TIEMPO_SALIR = 1               # tiempo para salir de estación (min)
 TIEMPO_ENTRE_EST = 2           # tiempo entre estaciones por metro (min)
 TIEMPO_TRANSBORDO = 5          # tiempo por transbordo entre líneas (min)
@@ -26,18 +22,16 @@ with open(os.path.join(BASE, "static", "lines.json"), "r", encoding="utf-8") as 
 
 # ----- Construir grafo puro de metro -----
 G = nx.Graph()                          # grafo que representa únicamente conexiones de metro
-pos_nodo = {}                           # mapa nodo -> (x_px, y_px)
+pos_nodo = {}                           # mapa nodo -> (lat, lon)
 estacion_a_nodos = defaultdict(list)    # mapa estacion_nombre -> lista de nodos (estación, linea)
 
 for linea, info in LINEAS.items():
     ests = list(info["stations"].keys())
     for i, est in enumerate(ests):
-        xr, yr = info["stations"][est]
-        px = xr * ANCHO_IMG
-        py = yr * ALTO_IMG
+        lat, lon = info["stations"][est]
         nodo = (est, linea)
 
-        pos_nodo[nodo] = (px, py)
+        pos_nodo[nodo] = (lat, lon)
         estacion_a_nodos[est].append(nodo)
 
         # cada nodo identifica estación + línea para permitir transbordos
@@ -59,11 +53,21 @@ for est, nodos in estacion_a_nodos.items():
 
 # ----- Utilidades -----
 def dist(a, b):
-    # distancia euclidiana en px entre dos posiciones (x,y)
-    return math.hypot(a[0]-b[0], a[1]-b[1])
+    # Fórmula de Haversine para distancia en metros entre (lat, lon)
+    R = 6371000  # radio de la Tierra en metros
+    lat1, lon1 = math.radians(a[0]), math.radians(a[1])
+    lat2, lon2 = math.radians(b[0]), math.radians(b[1])
+    
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    
+    a_val = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a_val), math.sqrt(1-a_val))
+    
+    return R * c
 
 def tiempo_caminando(a_pos, b_pos):
-    # convierte distancia px -> tiempo (min) usando VELOCIDAD_CAMINAR
+    # convierte distancia metros -> tiempo (min) usando VELOCIDAD_CAMINAR
     return dist(a_pos, b_pos) / VELOCIDAD_CAMINAR
 
 
@@ -193,7 +197,32 @@ def calcular_mejor_ruta(origen, destino):
         })
         total += t
 
-    return {"pasos": pasos, "tiempo_total": round(total,2)}
+    # ----- Generar instrucciones simplificadas -----
+    instrucciones = []
+    
+    # Filtrar solo los nodos reales (excluyendo ORI y FIN)
+    nodos_reales = [n for n in ruta_final if n != ORI and n != FIN]
+    
+    if nodos_reales:
+        # 1. Subida
+        primero = nodos_reales[0]
+        instrucciones.append(f"Subir en {primero[0]} (Línea {primero[1]})")
+        
+        # 2. Transbordos
+        # Recorremos para detectar cambios de línea en la misma estación
+        for i in range(len(nodos_reales) - 1):
+            actual = nodos_reales[i]
+            siguiente = nodos_reales[i+1]
+            
+            # Si es la misma estación pero diferente línea => Transbordo
+            if actual[0] == siguiente[0] and actual[1] != siguiente[1]:
+                instrucciones.append(f"Transbordar en {actual[0]} a Línea {siguiente[1]}")
+                
+        # 3. Bajada
+        ultimo = nodos_reales[-1]
+        instrucciones.append(f"Bajar en {ultimo[0]}")
+
+    return {"pasos": pasos, "tiempo_total": round(total,2), "instrucciones": instrucciones}
 
 
 # ----- FLASK -----

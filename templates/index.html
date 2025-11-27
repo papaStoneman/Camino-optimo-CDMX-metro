@@ -1,35 +1,54 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Camino Óptimo Metro CDMX</title>
-  <link rel="stylesheet" href="/static/style.css" />
-  <!-- Página mínima: el mapa es una imagen con un SVG encima para la ruta y un contenedor
-       donde JS añade elementos de estación. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 </head>
+
 <body>
+  <header>
+    <div class="header-content">
+      <h1>Camino Óptimo Metro CDMX</h1>
+      <button id="theme-toggle" aria-label="Cambiar tema">🌓</button>
+    </div>
+    <p class="subtitle">Selecciona origen y destino para calcular la ruta más rápida</p>
+  </header>
 
-  <h1>Camino óptimo del Metro CDMX</h1>
+  <main>
+    <div class="map-container">
+      <div id="mapa"></div>
+    </div>
 
-  <div id="mapa">
+    <aside class="info-panel">
+      <div id="resultado" class="result-card">
+        <h2>Tu Ruta</h2>
+        <p class="placeholder-text">Selecciona dos estaciones en el mapa.</p>
+      </div>
+      <div id="lista-pasos" class="steps-container"></div>
+    </aside>
+  </main>
 
-    <!-- imagen base del mapa; dimensiones fijas que el CSS y el backend asumen -->
-    <img id="imagen-metro" src="/static/map.png" alt="Mapa Metro CDMX">
+  <footer>
+    <p>Desarrollado con Flask y NetworkX</p>
+  </footer>
 
-    <!-- SVG para dibujar la ruta (líneas entre estaciones) -->
-    <svg id="ruta"></svg>
-
-    <!-- Contenedor donde JS insertará puntos interactivos para cada estación -->
-    <div id="estaciones"></div>
-
-  </div>
-
-  <!-- Resultados y lista de pasos que rellena el cliente JS -->
-  <div id="resultado"></div>
-  <div id="lista-pasos"></div>
-
-  <!-- Lógica del cliente: carga estaciones, maneja selección y pide rutas al backend -->
-  <script src="/static/map.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="{{ url_for('static', filename='map.js') }}"></script>
+  <script>
+    const toggleBtn = document.getElementById('theme-toggle');
+    toggleBtn.addEventListener('click', () => {
+      const currentTheme = document.documentElement.getAttribute('data-theme');
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', newTheme);
+    });
+  </script>
 </body>
+
 </html>

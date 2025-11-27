@@ -3,43 +3,75 @@
 // Estado global mínimo
 let inicio = null;    // nombre de estación inicio seleccionado
 let fin = null;       // nombre de estación fin seleccionado
-let estaciones = {};  // mapa nombre -> {x,y,linea,color}
+let estaciones = {};  // mapa nombre -> {lat, lon, linea, color}
+let map = null;       // instancia del mapa Leaflet
+let routeLayer = null; // capa para dibujar la ruta
 
-const capaEstaciones = document.getElementById("estaciones");
 const divResultado = document.getElementById("resultado");
 const divPasos = document.getElementById("lista-pasos");
 
-const ANCHO_MAPA = 1096;       // debe coincidir con dimensiones en backend
-const ALTO_MAPA = 1269;
+// Inicializar mapa Leaflet
+function initMap() {
+  // Coordenadas centrales de CDMX
+  map = L.map('mapa').setView([19.4326, -99.1332], 12);
 
-// Cargar estaciones (archivo JSON) y dibujarlas como puntos interactivos
-fetch("/static/lines.json")
-  .then(r => r.json())
-  .then(data => dibujarEstaciones(data));
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
 
-function dibujarEstaciones(data) {
-  // cada estación se representa como un div posicionado sobre el mapa
+  // Cargar estaciones
+  fetch("/static/lines.json")
+    .then(r => r.json())
+    .then(data => dibujarRed(data));
+}
+
+function dibujarRed(data) {
+  // Dibujar líneas y estaciones
   for (const [linea, info] of Object.entries(data)) {
     const color = info.color;
-    for (const [nombre, pos] of Object.entries(info.stations)) {
-      const [xr, yr] = pos;
-      const x = xr * ANCHO_MAPA;
-      const y = yr * ALTO_MAPA;
+    const points = [];
 
-      estaciones[nombre] = { x, y, linea, color };
+    // Recopilar puntos para la polilínea de la línea
+    // Nota: El orden en el JSON debe ser secuencial para que la línea se dibuje bien.
+    // Si no lo es, habría que ordenar, pero asumimos que el JSON está ordenado.
+    for (const [nombre, coords] of Object.entries(info.stations)) {
+      const [lat, lon] = coords;
+      estaciones[nombre] = { lat, lon, linea, color };
+      points.push([lat, lon]);
 
-      const punto = document.createElement("div");
-      punto.className = "estacion";
-      punto.style.left = x + "px";
-      punto.style.top = y + "px";
-      punto.style.backgroundColor = color;
-      punto.title = nombre;
+      // Marcador visual (no interactivo)
+      L.circleMarker([lat, lon], {
+        radius: 5,
+        fillColor: color,
+        color: "#fff",
+        weight: 1,
+        opacity: 1,
+        fillOpacity: 0.8,
+        interactive: false // Importante: no bloquea el hitMarker
+      }).addTo(map);
 
-      // click selecciona inicio/fin
-      punto.addEventListener("click", () => seleccionar(nombre));
+      // Marcador de interacción (invisible pero más grande)
+      const hitMarker = L.circleMarker([lat, lon], {
+        radius: 15, // Área de click más grande
+        fillColor: color,
+        color: "transparent",
+        weight: 0,
+        opacity: 0,
+        fillOpacity: 0
+      }).addTo(map);
 
-      capaEstaciones.appendChild(punto);
+      hitMarker.bindTooltip(nombre);
+      hitMarker.on('click', () => seleccionar(nombre));
     }
+
+    // Dibujar la línea del metro
+    L.polyline(points, {
+      color: color,
+      weight: 3,
+      opacity: 0.7
+    }).addTo(map);
   }
 }
 
@@ -47,14 +79,12 @@ function dibujarEstaciones(data) {
 function seleccionar(nombre) {
   if (!inicio) {
     inicio = nombre;
-    resaltar(nombre, "#00ff00");
     divResultado.textContent = `Inicio: ${nombre}`;
   }
   else if (!fin) {
     fin = nombre;
-    resaltar(nombre, "#ff0000");
     divResultado.textContent += ` → Fin: ${nombre}`;
-    calcularRuta(); // pedir ruta al backend cuando ya tenemos origen y destino
+    calcularRuta();
   }
   else {
     reiniciar();
@@ -62,31 +92,18 @@ function seleccionar(nombre) {
   }
 }
 
-function resaltar(nombre, color) {
-  // efecto visual para la estación seleccionada
-  document.querySelectorAll(".estacion").forEach(e => {
-    if (e.title === nombre) {
-      e.style.borderColor = color;
-      e.style.boxShadow = `0 0 10px ${color}`;
-    }
-  });
-}
-
 function reiniciar() {
-  // limpiar UI y estado
   inicio = null;
   fin = null;
-  divResultado.textContent = "";
+  divResultado.textContent = "Selecciona dos estaciones en el mapa.";
   divPasos.innerHTML = "";
-  document.getElementById("ruta").innerHTML = "";
-
-  document.querySelectorAll(".estacion").forEach(e => {
-    e.style.borderColor = "white";
-    e.style.boxShadow = "none";
-  });
+  if (routeLayer) {
+    map.removeLayer(routeLayer);
+    routeLayer = null;
+  }
 }
 
-// Envío al backend: POST /ruta con inicio/fin -> recibe {pasos, tiempo_total}
+// Envío al backend
 function calcularRuta() {
   fetch("/ruta", {
     method: "POST",
@@ -95,49 +112,50 @@ function calcularRuta() {
   })
     .then(r => r.json())
     .then(data => {
-      // dibujar y mostrar pasos recibidos
       dibujarRuta(data.pasos);
-      mostrarPasos(data.pasos);
+      mostrarPasos(data.instrucciones);
       divResultado.textContent += ` — Tiempo total: ${data.tiempo_total} min`;
     });
 }
 
-// Dibuja líneas SVG entre estaciones según pasos
+// Dibuja la ruta calculada en el mapa
 function dibujarRuta(pasos) {
-  const svg = document.getElementById("ruta");
-  svg.innerHTML = "";
+  if (routeLayer) {
+    map.removeLayer(routeLayer);
+  }
+
+  const latlngs = [];
+
+  // Añadir punto de origen
+  if (pasos.length > 0) {
+    const origen = estaciones[pasos[0].desde];
+    if (origen) latlngs.push([origen.lat, origen.lon]);
+  }
 
   pasos.forEach(p => {
-    const a = estaciones[p.desde];
-    const b = estaciones[p.hasta];
-
-    const linea = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    linea.setAttribute("x1", a.x);
-    linea.setAttribute("y1", a.y);
-    linea.setAttribute("x2", b.x);
-    linea.setAttribute("y2", b.y);
-
-    // color por tipo de paso para distinguir visualmente
-    if (p.tipo === "metro")
-      linea.setAttribute("stroke", "#ff3333");
-    else if (p.tipo === "transbordo")
-      linea.setAttribute("stroke", "yellow");
-    else if (p.tipo === "caminar")
-      linea.setAttribute("stroke", "#33aaff");
-    else if (p.tipo === "abordar")
-      linea.setAttribute("stroke", "white");
-
-    linea.setAttribute("stroke-width", "3");
-    svg.appendChild(linea);
+    const dest = estaciones[p.hasta];
+    if (dest) latlngs.push([dest.lat, dest.lon]);
   });
+
+  routeLayer = L.polyline(latlngs, {
+    color: 'white',
+    weight: 5,
+    opacity: 0.9,
+    dashArray: '10, 10'
+  }).addTo(map);
+
+  map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 }
 
 // Pinta la lista textual de pasos en la UI
-function mostrarPasos(pasos) {
+function mostrarPasos(instrucciones) {
   divPasos.innerHTML = "";
-  pasos.forEach(p => {
+  instrucciones.forEach(texto => {
     const d = document.createElement("div");
-    d.textContent = `${p.desde} → ${p.hasta} : ${p.tiempo} min (${p.tipo})`;
+    d.textContent = texto;
     divPasos.appendChild(d);
   });
 }
+
+// Iniciar
+initMap();

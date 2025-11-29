@@ -1,4 +1,4 @@
-/* style.css - Modern Dark Theme for Metro CDMX */
+/* style.css - estilo oscuro y sencillo*/
 
 :root {
   --bg-color: #121212;
@@ -87,7 +87,7 @@ main {
   flex-wrap: wrap;
 }
 
-/* Map Container */
+/* Donde va el mapa*/
 .map-container {
   background: var(--card-bg);
   padding: 10px;
@@ -100,7 +100,6 @@ main {
 #mapa {
   position: relative;
   display: inline-block;
-  /* Ensure map dimensions are respected */
   width: 1096px;
   height: 1269px;
 }
@@ -110,7 +109,6 @@ main {
   height: 1269px;
   display: block;
   opacity: 0.9;
-  /* Slightly dim map for better contrast with overlays */
 }
 
 #ruta {
@@ -149,7 +147,7 @@ main {
   z-index: 5;
 }
 
-/* Info Panel (Sidebar) */
+/* Panel de información (el de la derecha) */
 .info-panel {
   flex: 1;
   min-width: 300px;
@@ -201,7 +199,6 @@ footer {
   font-size: 0.8rem;
 }
 
-/* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
 }

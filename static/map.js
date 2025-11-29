@@ -1,11 +1,10 @@
-// map.js - control de la UI del mapa y comunicación con el backend
+// map.js - se encarga de controlar la ui del mapa y de la comunicación con el backend
 
-// Estado global mínimo
-let inicio = null;    // nombre de estación inicio seleccionado
-let fin = null;       // nombre de estación fin seleccionado
-let estaciones = {};  // mapa nombre -> {lat, lon, linea, color}
-let map = null;       // instancia del mapa Leaflet
-let routeLayer = null; // capa para dibujar la ruta
+let inicio = null;
+let fin = null;
+let estaciones = {};
+let map = null;       // mapa Leaflet
+let routeLayer = null; // capa extra para dibujar la ruta
 
 const divResultado = document.getElementById("resultado");
 const divPasos = document.getElementById("lista-pasos");
@@ -14,7 +13,7 @@ const divPasos = document.getElementById("lista-pasos");
 function initMap() {
   // Coordenadas centrales de CDMX
   map = L.map('mapa').setView([19.4326, -99.1332], 12);
-
+  //con esto copio el mapa 
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: 'abcd',
@@ -28,20 +27,17 @@ function initMap() {
 }
 
 function dibujarRed(data) {
-  // Dibujar líneas y estaciones
   for (const [linea, info] of Object.entries(data)) {
     const color = info.color;
     const points = [];
-
-    // Recopilar puntos para la polilínea de la línea
-    // Nota: El orden en el JSON debe ser secuencial para que la línea se dibuje bien.
+    // El orden en el JSON debe ser secuencial para que la línea se dibuje bien.
     // Si no lo es, habría que ordenar, pero asumimos que el JSON está ordenado.
     for (const [nombre, coords] of Object.entries(info.stations)) {
       const [lat, lon] = coords;
       estaciones[nombre] = { lat, lon, linea, color };
       points.push([lat, lon]);
 
-      // Marcador visual (no interactivo)
+      // Marcador visual 
       L.circleMarker([lat, lon], {
         radius: 5,
         fillColor: color,
@@ -49,12 +45,12 @@ function dibujarRed(data) {
         weight: 1,
         opacity: 1,
         fillOpacity: 0.8,
-        interactive: false // Importante: no bloquea el hitMarker
+        interactive: false // Importante: no bloquea el hitMarker, que si no no podemos seleccionar la estación
       }).addTo(map);
 
-      // Marcador de interacción (invisible pero más grande)
+      // hitbox para poder seleccionar la estación
       const hitMarker = L.circleMarker([lat, lon], {
-        radius: 15, // Área de click más grande
+        radius: 15,
         fillColor: color,
         color: "transparent",
         weight: 0,
@@ -66,7 +62,7 @@ function dibujarRed(data) {
       hitMarker.on('click', () => seleccionar(nombre));
     }
 
-    // Dibujar la línea del metro
+    //Con esto dibujamos la línea del metro
     L.polyline(points, {
       color: color,
       weight: 3,
@@ -157,5 +153,4 @@ function mostrarPasos(instrucciones) {
   });
 }
 
-// Iniciar
 initMap();

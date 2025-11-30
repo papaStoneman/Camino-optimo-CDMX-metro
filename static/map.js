@@ -5,6 +5,7 @@ let fin = null;
 let estaciones = {};
 let map = null;       // mapa Leaflet
 let routeLayer = null; // capa extra para dibujar la ruta
+let coloresLineas = {}; // mapa de colores por línea 
 
 const divResultado = document.getElementById("resultado");
 const divPasos = document.getElementById("lista-pasos");
@@ -29,6 +30,7 @@ function initMap() {
 function dibujarRed(data) {
   for (const [linea, info] of Object.entries(data)) {
     const color = info.color;
+    coloresLineas[linea] = color; // Guardamos el color de la línea
     const points = [];
     // El orden en el JSON debe ser secuencial para que la línea se dibuje bien.
     // Si no lo es, habría que ordenar, pero asumimos que el JSON está ordenado.
@@ -109,9 +111,17 @@ function calcularRuta() {
     .then(r => r.json())
     .then(data => {
       dibujarRuta(data.pasos);
-      mostrarPasos(data.instrucciones);
-      divResultado.textContent += ` — Tiempo total: ${data.tiempo_total} min`;
+      mostrarPasos(data.instrucciones, data.pasos);
+      divResultado.textContent += ` — Tiempo total: ${formatearTiempo(data.tiempo_total)}`;
     });
+}
+
+function formatearTiempo(minutos) {
+  const m = Math.round(minutos);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return `${h} h ${rest} min`;
 }
 
 // Dibuja la ruta calculada en el mapa
@@ -143,13 +153,157 @@ function dibujarRuta(pasos) {
   map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 }
 
-// Pinta la lista textual de pasos en la UI
-function mostrarPasos(instrucciones) {
+// Sirve para poner por que estaciones se pasa en cada línea
+function mostrarPasos(instrucciones, pasos) {
   divPasos.innerHTML = "";
-  instrucciones.forEach(texto => {
-    const d = document.createElement("div");
-    d.textContent = texto;
-    divPasos.appendChild(d);
+
+  if (!pasos || pasos.length === 0) return;
+
+  // primero lo agrupamos en segmentos, como caminar, línea de metro o transbordo.
+  const segmentos = [];
+  let segmentoActual = null;
+
+  pasos.forEach((paso, index) => {
+    if (paso.tipo === "caminar" || paso.tipo === "transbordo" || paso.tipo === "llegada") {
+      if (segmentoActual) {
+        segmentos.push(segmentoActual);
+        segmentoActual = null;
+      }
+      // añadimos el paso de transición
+      segmentos.push({
+        tipo: paso.tipo,
+        desde: paso.desde,
+        hasta: paso.hasta,
+        tiempo: paso.tiempo
+      });
+    } else if (paso.tipo === "metro") {
+      // Si nos cambiamos de línea, cerramos el segmento actual y creamos uno nuevo
+      if (!segmentoActual || segmentoActual.linea !== paso.linea) {
+        if (segmentoActual) {
+          segmentos.push(segmentoActual);
+        }
+        segmentoActual = {
+          tipo: "metro",
+          linea: paso.linea,
+          estaciones: [paso.desde],
+          tiempoTotal: 0
+        };
+      }
+      segmentoActual.estaciones.push(paso.hasta);
+      segmentoActual.tiempoTotal += paso.tiempo;
+    }
+  });
+
+  // peude quedar un segmento abierto, así que lo añadimos también
+  if (segmentoActual) {
+    segmentos.push(segmentoActual);
+  }
+
+  // Ahora renderizamos los segmentos
+  segmentos.forEach((seg, index) => {
+    const div = document.createElement("div");
+    div.className = "route-segment";
+
+    if (seg.tipo === "metro") {
+      const header = document.createElement("div");
+      header.className = "segment-header";
+
+      // color que le ponemos al símbolo que hay encima de la línea, primero le damos un generico y luego con el mapa
+      //le damos el que le corresponde.
+      let colorLinea = "#999";
+      // Usamos el mapa de colores de líneas para dar el color de la línea
+      if (coloresLineas[seg.linea]) {
+        colorLinea = coloresLineas[seg.linea];
+      } else if (estaciones[seg.estaciones[0]]) {
+        colorLinea = estaciones[seg.estaciones[0]].color;
+      }
+
+      header.innerHTML = `
+        <div class="line-indicator" style="background-color: ${colorLinea};"></div>
+        <div class="segment-info">
+          <strong>${seg.estaciones[0]}</strong>
+          <span class="line-name" style="color: ${colorLinea}">Línea ${seg.linea}</span>
+        </div>
+        <div class="segment-time">${Math.round(seg.tiempoTotal)} min</div>
+      `;
+      div.appendChild(header);
+
+      // ESto es solo la línea vertical que se dibuja a la izquierda de cada apartado
+      const body = document.createElement("div");
+      body.className = "segment-body";
+      body.style.borderLeftColor = colorLinea;
+
+      // Estaciones intermedias de cada apartado
+      const intermedias = seg.estaciones.slice(1, -1); // Excluir inicio y fin
+      if (intermedias.length > 0) {
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "toggle-stops-btn";
+        toggleBtn.textContent = `${intermedias.length} paradas`;
+
+        const stopsList = document.createElement("div");
+        stopsList.className = "stops-list";
+        stopsList.style.display = "none";
+
+        intermedias.forEach(est => {
+          const stop = document.createElement("div");
+          stop.className = "stop-item";
+          stop.textContent = est;
+          stopsList.appendChild(stop);
+        });
+
+        toggleBtn.addEventListener("click", () => {
+          if (stopsList.style.display === "none") {
+            stopsList.style.display = "block";
+            toggleBtn.textContent = "Ocultar paradas";
+          } else {
+            stopsList.style.display = "none";
+            toggleBtn.textContent = `${intermedias.length} paradas`;
+          }
+        });
+
+        body.appendChild(toggleBtn);
+        body.appendChild(stopsList);
+      } else {
+        // Si no hay estaciones intermedias, ponemos 1 parada
+        const directo = document.createElement("div");
+        directo.className = "direct-route";
+        directo.textContent = "1 parada";
+        body.appendChild(directo);
+      }
+
+      div.appendChild(body);
+
+      // Final del apartado
+      const footer = document.createElement("div");
+      footer.className = "segment-footer";
+      footer.innerHTML = `
+        <div class="line-indicator" style="background-color: ${colorLinea};"></div>
+        <div class="segment-info">
+          <strong>${seg.estaciones[seg.estaciones.length - 1]}</strong>
+        </div>
+      `;
+      div.appendChild(footer);
+
+    } else {
+      // Renderizar Caminar / Transbordo
+      div.classList.add("transition-segment");
+      let icon = "🚶";
+      let text = `Caminar a ${seg.hasta}`;
+      if (seg.tipo === "transbordo") {
+        icon = "🔄";
+        text = `Transbordo a ${seg.hasta}`;
+      }
+
+      div.innerHTML = `
+        <div class="transition-icon">${icon}</div>
+        <div class="transition-info">
+          <span>${text}</span>
+          <span class="transition-time">${Math.round(seg.tiempo)} min</span>
+        </div>
+      `;
+    }
+
+    divPasos.appendChild(div);
   });
 }
 

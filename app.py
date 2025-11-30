@@ -190,7 +190,8 @@ def calcular_mejor_ruta(origen, destino):
             "desde": a[0],
             "hasta": b[0],
             "tiempo": round(t,2),
-            "tipo": tipo
+            "tipo": tipo,
+            "linea": a[1] if tipo == "metro" else None
         })
         total += t
 

@@ -308,3 +308,4 @@ function mostrarPasos(instrucciones, pasos) {
 }
 
 initMap();
+ 
